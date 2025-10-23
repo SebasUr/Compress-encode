@@ -2,7 +2,7 @@ CC = gcc
 CFLAGS = -std=c11 -Wall -Wextra -pedantic -O2
 LDFLAGS =
 
-SRC = main.c huffman.c
+SRC = main.c huffman.c bitwriter.c compress.c
 OBJ = $(SRC:.c=.o)
 BIN = huffman
 

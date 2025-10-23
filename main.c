@@ -7,6 +7,7 @@
 #include <ctype.h> 
 
 #include "huffman.h"
+#include "compress.h"
 
 void compute_p_s(double p_s[], int f_s[], const unsigned char* buf, ssize_t nread) {
     for (size_t i = 0; i < nread; i++) {
@@ -18,7 +19,6 @@ void compute_p_s(double p_s[], int f_s[], const unsigned char* buf, ssize_t nrea
         p_s[i] = (double)f_s[i] / (double)nread;
     }
 }
-
 
 int main(void) {
     const char *path = "bible.txt";
@@ -60,26 +60,29 @@ int main(void) {
             printf("Byte %d: %f probs\n", i, p_s[i]);
     }
 
-    /* reservar arreglo de nodos activos (punteros) */
+    // reservar arreglo de nodos activos (punteros)
     huffmanNode **activeNodes = malloc(256 * sizeof(huffmanNode *));
     if (!activeNodes) {
         perror("malloc activeNodes");
-        free(buf);
-        close(fd);
+        free(buf); close(fd);
         return 1;
     }
 
-    /* Construir árbol Huffman */
-    huffmanNode *root = huffmanAlgorithm(f_s, activeNodes);
+    // Construir árbol Huffman y obtener códigos
+    Code codes[256];
+    huffmanNode *root = huffmanAlgorithm(f_s, activeNodes, codes);
     if (!root) {
-        fprintf(stderr, "huffmanAlgorithm devolvió NULL (posible error o archivo vacío)\n");
+        fprintf(stderr, "NULL Returned: possible bad file.\n");
         free(activeNodes);
         free(buf);
         close(fd);
         return 1;
     }
 
-    /* Liberar memoria del árbol y del arreglo de punteros */
+    if (compressFile(buf, (size_t)nread, "bible.huf", codes) != 0) {
+        fprintf(stderr, "Error writing compressed file.\n");
+    }
+
     freeHuffmanTree(root);
     free(activeNodes);
 

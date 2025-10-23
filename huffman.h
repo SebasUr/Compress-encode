@@ -12,10 +12,10 @@ typedef struct huffmanNode {
     struct huffmanNode* right;
 } huffmanNode;
 
-// typedef struct Code {
-//     unsigned char bits[32]; // Maximum 256 bits
-//     size_t length;          // Length in bits
-// } Code;
+typedef struct Code {
+    uint64_t bits;     // Bits del código (máximo 64 bits)
+    size_t length;     // Longitud en bits
+} Code;
 
 // Creates a new Huffman node
 huffmanNode* createNode(int symbol, uint64_t weight, unsigned long order);
@@ -29,11 +29,16 @@ size_t initializeTree(const int f_s[], huffmanNode* activeNodes[]);
 // Comparator function for qsort
 int nodeComparator(const void *a, const void *b);
 
+// Assign codes
+// based on huffmanTree assigns in a code list  0 for left decisions, 1 for right decisions.
+void assignCodes(const huffmanNode* node, uint64_t cur_bits, int cur_len, Code codes[256]);
+
+
 // Builds the Huffman tree from frequency array
 // f_s: frequency array of size 256
 // activeNodes: working array (must be pre-allocated: malloc(256 * sizeof(huffmanNode*)))
 // Returns: root node of the Huffman tree, or NULL on error
-huffmanNode* huffmanAlgorithm(const int f_s[], huffmanNode* activeNodes[]);
+huffmanNode* huffmanAlgorithm(const int f_s[], huffmanNode* activeNodes[], Code codes[256]);
 
 // Frees the entire Huffman tree
 void freeHuffmanTree(huffmanNode* root);

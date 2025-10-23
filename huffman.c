@@ -4,6 +4,7 @@
 
 #include "huffman.h"
 
+static Code *g_codes_for_sort = NULL;
 huffmanNode* createNode(int symbol, uint64_t weight, unsigned long order) {
     huffmanNode* NewNode = malloc(sizeof *NewNode);
     if (NewNode == NULL) { return NULL; }
@@ -49,7 +50,75 @@ int nodeComparator(const void *a, const void *b) {
     return 0;
 }
 
-huffmanNode* huffmanAlgorithm(const int f_s[], huffmanNode* activeNodes[]) {
+int codeSymbolComparator(const void *pa, const void *pb) {
+    const int a = *(const int*)pa;
+    const int b = *(const int*)pb;
+    size_t la = g_codes_for_sort[a].length;
+    size_t lb = g_codes_for_sort[b].length;
+    if (la < lb) return -1;
+    if (la > lb) return 1;
+    return a - b;
+}
+
+void buildCanonicalCodes(Code codes[256], const int symbols[], int m) {
+    
+    // Obtener symbol de máx len.
+    int max_len = 0;
+    for (int i = 0; i < m; ++i){
+        if ((int)codes[symbols[i]].length > max_len){
+            max_len = (int)codes[symbols[i]].length;
+        }
+    }
+
+    // BL count para saber cuantas longitudes hay
+    /*  sym 10: len = 1
+        sym 20): len = 2
+        sym 30): len = 2
+        sym 40): len = 3
+        bl_count: bl_count[1]=1, bl_count[2]=2, bl_count[3]=1*/
+
+    if (max_len == 0) { return; }
+    int *bl_count = calloc(max_len + 1, sizeof(int)); 
+    for (int i = 0; i < m; ++i) {
+        bl_count[codes[symbols[i]].length] += 1;
+    }
+
+    // first code para no utilizar un arbol.
+    uint32_t *first_code = calloc(max_len + 1, sizeof(uint32_t));
+    uint32_t code = 0;
+    for (int bits = 1; bits <= max_len; ++bits) {
+        code = (code + (uint32_t)bl_count[bits - 1]) << 1;
+        first_code[bits] = code;
+    }
+
+    // asignación de códigos canónicos
+    for (int i = 0; i < m; ++i) {
+        int s = symbols[i];
+        int len = (int)codes[s].length;
+        uint32_t assigned = first_code[len];
+        first_code[len] += 1;
+        codes[s].bits = (uint64_t)assigned;
+    }
+
+    free(bl_count);
+    free(first_code);
+}
+
+void assignCodes(const huffmanNode* node, uint64_t cur_bits, int cur_len, Code codes[256]){
+    if(!node){
+        return;
+    }
+
+    if(node->symbol != -1){
+        codes[node->symbol].bits = cur_bits;
+        codes[node->symbol].length = cur_len;
+    }
+
+    assignCodes(node->left, (cur_bits << 1) | 0ULL, cur_len+1, codes);
+    assignCodes(node->right, (cur_bits << 1) | 1ULL, cur_len+1, codes);
+}
+
+huffmanNode* huffmanAlgorithm(const int f_s[], huffmanNode* activeNodes[], Code codes[256]) {
     size_t count = initializeTree(f_s, activeNodes);
 
     if (count == 0) return NULL;
@@ -75,8 +144,22 @@ huffmanNode* huffmanAlgorithm(const int f_s[], huffmanNode* activeNodes[]) {
     }
 
     huffmanNode* root = activeNodes[0];
+
+    memset(codes, 0, 256 * sizeof(Code));
+    assignCodes(root, 0ULL, 0, codes);
+
+    int symbols[256]; int m = 0;
+    for (int s = 0; s < 256; ++s) { if (codes[s].length > 0) symbols[m++] = s; }
+
+    g_codes_for_sort = codes;
+    qsort(symbols, m, sizeof(int), codeSymbolComparator);
+    g_codes_for_sort = NULL;
+
+    buildCanonicalCodes(codes, symbols, m);
+
     return root;
 }
+
 
 void freeHuffmanTree(huffmanNode* root) {
     if (root == NULL) {
