@@ -80,6 +80,18 @@ typedef struct {
     size_t length;
 } CanonicalEntry;
 
+typedef struct {
+    uint64_t base_code;
+    int start_index;
+    int count;
+} CanonicalRow;
+
+typedef struct {
+    int fd;
+    unsigned char buffer[4096];
+    size_t pos;
+} ByteWriter;
+
 static int compareEntries(const void *a, const void *b) {
     const CanonicalEntry *ea = (const CanonicalEntry *)a;
     const CanonicalEntry *eb = (const CanonicalEntry *)b;
@@ -125,6 +137,80 @@ static void reconstructCanonicalCodes(const unsigned char lens[256], Code codes[
     }
 }
 
+static int prepareCanonicalRows(const Code codes[256], CanonicalEntry entries[256], CanonicalRow rows[257], size_t *out_max_len) {
+    int count = 0;
+    size_t max_len = 0;
+
+    for (int i = 0; i < 256; i++) {
+        if (codes[i].length > 0) {
+            entries[count].symbol = i;
+            entries[count].length = codes[i].length;
+            entries[count].code = codes[i].bits;
+            if (codes[i].length > max_len) {
+                max_len = codes[i].length;
+            }
+            count++;
+        }
+    }
+
+    if (count == 0) {
+        *out_max_len = 0;
+        return 0;
+    }
+
+    qsort(entries, count, sizeof(CanonicalEntry), compareEntries);
+
+    for (size_t i = 0; i < 257; ++i) {
+        rows[i].base_code = 0;
+        rows[i].start_index = -1;
+        rows[i].count = 0;
+    }
+
+    int idx = 0;
+    while (idx < count) {
+        size_t len = entries[idx].length;
+        int start = idx;
+        int end = idx;
+        while (end < count && entries[end].length == len) {
+            end++;
+        }
+        rows[len].base_code = entries[start].code;
+        rows[len].start_index = start;
+        rows[len].count = end - start;
+        idx = end;
+    }
+
+    *out_max_len = max_len;
+    return count;
+}
+
+static void byteWriterInit(ByteWriter *bw, int fd) {
+    bw->fd = fd;
+    bw->pos = 0;
+}
+
+static int byteWriterFlush(ByteWriter *bw) {
+    if (bw->pos == 0) {
+        return 0;
+    }
+    ssize_t written = write(bw->fd, bw->buffer, bw->pos);
+    if (written != (ssize_t)bw->pos) {
+        return -1;
+    }
+    bw->pos = 0;
+    return 0;
+}
+
+static int byteWriterPut(ByteWriter *bw, unsigned char byte) {
+    bw->buffer[bw->pos++] = byte;
+    if (bw->pos == sizeof(bw->buffer)) {
+        if (byteWriterFlush(bw) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 int decompressFile(const char *input_path, const char *output_path) {
     int fd_in = open(input_path, O_RDONLY);
     if (fd_in < 0) {
@@ -163,6 +249,14 @@ int decompressFile(const char *input_path, const char *output_path) {
     Code codes[256];
     memset(codes, 0, sizeof(codes));
     reconstructCanonicalCodes(lens, codes);
+
+    CanonicalEntry entries[256];
+    CanonicalRow rows[257];
+    size_t max_len = 0;
+    if (prepareCanonicalRows(codes, entries, rows, &max_len) < 0) {
+        close(fd_in);
+        return -1;
+    }
     
     // Abrir archivo de salida
     int fd_out = open(output_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -174,7 +268,12 @@ int decompressFile(const char *input_path, const char *output_path) {
     // Inicializar BitReader
     BitReader br;
     bitReaderInit(&br, fd_in);
-    
+
+    int status = 0;
+
+    ByteWriter out;
+    byteWriterInit(&out, fd_out);
+
     // Decodificar datos
     uint64_t bytes_written = 0;
     uint64_t current_code = 0;
@@ -183,41 +282,44 @@ int decompressFile(const char *input_path, const char *output_path) {
     while (bytes_written < original_size) {
         int bit = bitReaderReadBit(&br);
         if (bit < 0) {
-            close(fd_in);
-            close(fd_out);
-            return -1;
+            status = -1;
+            break;
         }
         
         // Construir código bit a bit
         current_code = (current_code << 1) | bit;
         current_length++;
         
-        // Buscar coincidencia en los códigos
-        int found = -1;
-        for (int i = 0; i < 256; i++) {
-            if (codes[i].length == (size_t)current_length && 
-                codes[i].bits == current_code) {
-                found = i;
-                break;
-            }
+        if ((size_t)current_length > max_len) {
+            status = -1;
+            break;
         }
-        
-        if (found >= 0) {
-            // Código encontrado, escribir símbolo
-            unsigned char symbol = (unsigned char)found;
-            if (write(fd_out, &symbol, 1) != 1) {
-                close(fd_in);
-                close(fd_out);
-                return -1;
+
+        CanonicalRow row = rows[current_length];
+        if (row.count > 0 && current_code >= row.base_code) {
+            uint64_t offset = current_code - row.base_code;
+            if (offset < (uint64_t)row.count) {
+                CanonicalEntry entry = entries[row.start_index + (int)offset];
+                unsigned char symbol = (unsigned char)entry.symbol;
+                if (byteWriterPut(&out, symbol) != 0) {
+                status = -1;
+                break;
             }
             
             bytes_written++;
             current_code = 0;
             current_length = 0;
+            }
         }
     }
-    
+
+    bitReaderClose(&br);
+    if (status == 0) {
+        if (byteWriterFlush(&out) != 0) {
+            status = -1;
+        }
+    }
     close(fd_in);
     close(fd_out);
-    return 0;
+    return status;
 }
