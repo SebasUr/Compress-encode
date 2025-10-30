@@ -9,14 +9,10 @@
 #include "huffman.h"
 #include "compress.h"
 
-void compute_p_s(double p_s[], int f_s[], const unsigned char* buf, ssize_t nread) {
+void compute_f_s(int f_s[], const unsigned char* buf, ssize_t nread) {
     for (size_t i = 0; i < nread; i++) {
         unsigned char byte = buf[i];   // Leer el valor del byte (0–255)
         f_s[byte]++;                  // Incrementar el contador.
-    }
-
-    for (int i = 0; i < 256; i++) {
-        p_s[i] = (double)f_s[i] / (double)nread;
     }
 }
 
@@ -51,14 +47,8 @@ int main(void) {
         printf("%02x ", buf[i]);
     printf("\nRead %zd bytes\n", nread);
 
-    double p_s[256] = {0};
     int f_s[256] = {0};
-    compute_p_s(p_s, f_s, buf, nread);
-
-    for (int i = 0; i < 256; i++) {
-        if (p_s[i] > 0)
-            printf("Byte %d: %f probs\n", i, p_s[i]);
-    }
+    compute_f_s(f_s, buf, nread);
 
     // reservar arreglo de nodos activos (punteros)
     huffmanNode **activeNodes = malloc(256 * sizeof(huffmanNode *));
@@ -81,6 +71,15 @@ int main(void) {
 
     if (compressFile(buf, (size_t)nread, "bible.huf", codes) != 0) {
         fprintf(stderr, "Error writing compressed file.\n");
+    } else {
+        printf("Compression successful: bible.huf\n");
+        
+        // Probar descompresión
+        if (decompressFile("bible.huf", "bible_decompressed.txt") != 0) {
+            fprintf(stderr, "Error decompressing file.\n");
+        } else {
+            printf("Decompression successful: bible_decompressed.txt\n");
+        }
     }
 
     freeHuffmanTree(root);
