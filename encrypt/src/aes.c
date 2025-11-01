@@ -1,8 +1,9 @@
-#include "aes.h"
 #include <stdio.h>
+#include "aes.h"
+#include "key.h"
 
 // ---------------------HELPERS--------------------------------------------------------------------
-static uint8_t sbox[256] = {
+const uint8_t sbox[256] = {
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
     0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
     0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
@@ -104,12 +105,27 @@ void mix_columns(state_t *state) {
     }
 }
 
-aes_code_t encrypt(const uint8_t *plaintext) {
+void add_round_key(state_t *state, const word* words, const int round) {
+    uint8_t temp[4];
+    for (uint8_t c = 0; c < 4; c++) {
+        for (uint8_t r = 0; r < 4; r++) {
+            temp[r] = (*state)[r][c];
+        }
+        (*state)[0][c] = temp[0] ^ words[round+c][0];
+        (*state)[1][c] = temp[1] ^ words[round+c][1];
+        (*state)[2][c] = temp[2] ^ words[round+c][2];
+        (*state)[3][c] = temp[3] ^ words[round+c][3];
+    }
+}
+
+aes_code_t encrypt(const uint8_t *plaintext, const uint8_t *key) {
     state_t state;
+    word expanded_key[44];
     plaintext_to_state(plaintext, &state);
-
-    // Print initial state
-    printf("Initial State:\n");
+    key_expansion(key, expanded_key);
+    
+    // Initial State
+    printf("Initial state:\n");
     for (uint8_t i = 0; i < 4; ++i) {
         for (uint8_t j = 0; j < 4; ++j) {
             printf("%02x ", state[i][j]);
@@ -117,21 +133,22 @@ aes_code_t encrypt(const uint8_t *plaintext) {
         printf("\n");
     }
     printf("\n");
-
-    // Test SubBytes
+    
+    // Start of AES rounds
+    add_round_key(&state, expanded_key, 0);
+    for (int round = 1; round <= 9; round++) {
+        sub_bytes(&state);
+        shift_rows(&state);
+        mix_columns(&state);
+        add_round_key(&state, expanded_key, round * 4);
+    }
+    // Final round (no MixColumns)
     sub_bytes(&state);
-    printf("State after SubBytes:\n");
-    for (uint8_t i = 0; i < 4; ++i) {
-        for (uint8_t j = 0; j < 4; ++j) {
-            printf("%02x ", state[i][j]);
-        }
-        printf("\n");
-    }
-    printf("\n");
-
-    // Test ShiftRows
     shift_rows(&state);
-    printf("State after ShiftRows:\n");
+    add_round_key(&state, expanded_key, 40);
+    
+    // Output of ciphertext
+    printf("Ciphertext:\n");
     for (uint8_t i = 0; i < 4; ++i) {
         for (uint8_t j = 0; j < 4; ++j) {
             printf("%02x ", state[i][j]);
@@ -140,16 +157,11 @@ aes_code_t encrypt(const uint8_t *plaintext) {
     }
     printf("\n");
 
-    // Test MixColumns
-    mix_columns(&state);
-    printf("State after MixColumns:\n");
-    for (uint8_t i = 0; i < 4; ++i) {
-        for (uint8_t j = 0; j < 4; ++j) {
-            printf("%02x ", state[i][j]);
-        }
-        printf("\n");
-    }
-    printf("\n");
+    // printf("Expanded key:\n");
+    // for (int i = 0; i < 44; i++) {
+    //     printf("%2d: %02x %02x %02x %02x\n", i, expanded_key[i][0], expanded_key[i][1], expanded_key[i][2], expanded_key[i][3]);
+    // }
+    // printf("\n");
 
     return AES_SUCCESS;
 }
